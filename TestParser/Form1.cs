@@ -19,8 +19,12 @@ namespace TestParser
 
         private void btnRun_Click(object sender, EventArgs e)
         {
-            string result = Dilip.ExpenseAccountParser.GenerateCSVFile("..\\..\\AccountSample.doc", "output.txt");
+            ParserResult result = Dilip.ExpenseAccountParser.GenerateCSVFile("..\\..\\AccountSample.doc", "output.txt");
             Console.WriteLine(result);
+            if (result == ParserResult.ParsingSuccessful)
+            {
+                System.Diagnostics.Process.Start("output.txt");
+            }
         }
     }
 }
