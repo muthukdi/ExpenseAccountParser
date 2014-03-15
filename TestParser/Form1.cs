@@ -25,6 +25,14 @@ namespace TestParser
             {
                 System.Diagnostics.Process.Start("output.txt");
             }
+            /*for (int i = 77; i < 101; i++)
+            {
+                string documentPath = "C:\\Users\\dilip\\Desktop\\Data\\Account" + i + ".doc";
+                string outputPath = "C:\\Users\\dilip\\Desktop\\Output\\output" + i + ".txt";
+                ParserResult result = Dilip.ExpenseAccountParser.GenerateCSVFile(documentPath, outputPath);
+                Console.WriteLine(result);
+                Console.WriteLine();
+            }*/
         }
     }
 }

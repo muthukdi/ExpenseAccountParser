@@ -8,6 +8,7 @@ using Spire.Doc.Documents;
 using Spire.Doc.Fields;
 using Spire.Doc.Formatting;
 using System.IO;
+using System.Text.RegularExpressions;
 
 namespace Dilip
 {
@@ -16,15 +17,22 @@ namespace Dilip
         ParsingSuccessful,
         FileFormatError,
         SectionNotFoundError,
+        TitleFormatError,
+        MonthYearValuesRetrieved,
         TableNotFoundError,
         MultipleTablesError,
         TableRowCountError,
         TableColumnCountError,
+        DateCellStructureError,
+        ExpenseCellStructureError,
+        DailyCellStructureError,
+        LeftoverCellStructureError,
+        TableStructureIntact,
         DateCellFormatError,
         ExpenseCellFormatError,
         DailyCellFormatError,
         LeftoverCellFormatError,
-        TableStructureIntact
+        TableDataIntact
     };
 
     enum ExpenseType
@@ -35,17 +43,17 @@ namespace Dilip
         Deposit,
         Refund,
         Cash,
-        DebitCredit
+        DebitCredit,
+        Unknown
     };
 
     class ExpenseAccountParser
     {
+        static string month;
+        static string year;
+        static ParserResult result;
         // Parses the specified expense account and writes the records to the output file
-        // as character separated values containing the fields:
-        // 1. Date
-        // 2. Amount
-        // 3. Description
-        // 4. Type
+        // as character separated values containing the fields: Date, Amount, Description, and Type
         public static ParserResult GenerateCSVFile(string documentPath, string outputFilePath)
         {
             //Open the Word document
@@ -59,16 +67,26 @@ namespace Dilip
                 return ParserResult.FileFormatError;
             }
             DocumentObject obj = document.ChildObjects.FirstItem;
-            DocumentObjectType type = obj.DocumentObjectType;
-            if (type == DocumentObjectType.Section)
+            if (obj.DocumentObjectType == DocumentObjectType.Section)
             {
                 Section section = (Section)obj;
+                result = extractMonthYearValues(section);
+                if (result != ParserResult.MonthYearValuesRetrieved)
+                {
+                    return result;
+                }
+                // There should be exactly one table in this document!
                 if (section.Tables.Count == 1)
                 {
                     // We now have access to the expense table!
                     Table table = (Table)section.Tables[0];
-                    ParserResult result = CheckTableStructure(table);
+                    result = CheckTableStructure(table);
                     if (result != ParserResult.TableStructureIntact)
+                    {
+                        return result;
+                    }
+                    result = CheckTableDataFormat(table);
+                    if (result != ParserResult.TableDataIntact)
                     {
                         return result;
                     }
@@ -101,39 +119,150 @@ namespace Dilip
             }
         }
 
+        // Extract the month and the year values from the title
+        private static ParserResult extractMonthYearValues(Section section)
+        {
+            if (section.Paragraphs.Count > 1)
+            {
+                string text = section.Paragraphs[1].Text;
+                string[] months = { "January", "February", "March", "April", "May", "June", 
+                                         "July", "August", "September", "October", "November", "December" };
+                foreach (string str in months)
+                {
+                    if (text.Contains(str))
+                    {
+                        month = str;
+                        Console.WriteLine(month);
+                        break;
+                    }
+                }
+                if (month == null)
+                {
+                    return ParserResult.TitleFormatError;
+                }
+                for (int n = 1999; n < 2020; n++)
+                {
+                    if (text.Contains(Convert.ToString(n)))
+                    {
+                        year = Convert.ToString(n);
+                        Console.WriteLine(year);
+                        break;
+                    }
+                }
+                if (year == null)
+                {
+                    return ParserResult.TitleFormatError;
+                }
+            }
+            else
+            {
+                return ParserResult.TitleFormatError;
+            }
+            return ParserResult.MonthYearValuesRetrieved;
+        }
+
         // Make sure that the table has the correct structure
         private static ParserResult CheckTableStructure(Table table)
         {
+            // Wrong number of rows
             if (table.Rows.Count > 32 || table.Rows.Count < 29)
             {
                 return ParserResult.TableRowCountError;
             }
             for (int i = 1; i < table.Rows.Count; i++)
             {
+                // Wrong number of columns
                 if (table.Rows[i].Cells.Count != 4)
                 {
                     return ParserResult.TableColumnCountError;
                 }
-                else if (table.Rows[i].Cells[0].Paragraphs.Count != 1)
+                // Must be exactly one entry in the date field
+                if (table.Rows[i].Cells[0].Paragraphs.Count != 1)
                 {
-                    return ParserResult.DateCellFormatError;
+                    return ParserResult.DateCellStructureError;
                 }
-                else if (table.Rows[i].Cells[1].Paragraphs.Count == 0)
+                // The entry in the date field must not be blank
+                if (table.Rows[i].Cells[0].Paragraphs[0].Equals(""))
                 {
-                    return ParserResult.ExpenseCellFormatError;
+                    return ParserResult.DateCellStructureError;
                 }
-                else if (table.Rows[i].Cells[2].Paragraphs.Count != 1)
+                // Each entry in the expenses field must not be blank
+                for (int j = 0; j < table.Rows[i].Cells[1].Paragraphs.Count; j++)
                 {
-                    return ParserResult.DailyCellFormatError;
+                    if (table.Rows[i].Cells[1].Paragraphs[j].Equals(""))
+                    {
+                        return ParserResult.ExpenseCellStructureError;
+                    }
                 }
-                else if (table.Rows[i].Cells[3].Paragraphs.Count != 1)
+                // Must be exactly one entry in the daily field
+                if (table.Rows[i].Cells[2].Paragraphs.Count != 1)
                 {
-                    return ParserResult.DateCellFormatError;
+                    return ParserResult.DailyCellStructureError;
+                }
+                // The entry in the daily field must not be blank
+                if (table.Rows[i].Cells[2].Paragraphs[0].Equals(""))
+                {
+                    return ParserResult.DailyCellStructureError;
+                }
+                // Must be exactly one entry in the left-over field
+                if (table.Rows[i].Cells[3].Paragraphs.Count != 1)
+                {
+                    return ParserResult.LeftoverCellFormatError;
+                }
+                // The entry in the left-over field must not be blank
+                if (table.Rows[i].Cells[3].Paragraphs[0].Equals(""))
+                {
+                    return ParserResult.LeftoverCellStructureError;
                 }
             }
             return ParserResult.TableStructureIntact;
         }
 
+        // Make sure that the actual data in the table makes sense
+        private static ParserResult CheckTableDataFormat(Table table)
+        {
+            Regex dateRegex = new Regex(month + " [0-9]{1,2}, " + year);
+            Regex expenseRegex = new Regex("(\\$[0-9]+.[0-9]{2} )|(None)");
+            Regex dailyRegex = new Regex("(\\$[0-9]+.[0-9]{2})|(None)");
+            Regex leftoverRegex = new Regex("(\\$[0-9]+.[0-9]{2})|(None)");
+            for (int i = 1; i < table.Rows.Count; i++)
+            {
+                string date = table.Rows[i].Cells[0].Paragraphs[0].Text;
+                // Must be a date in the current month and year with the format (Month XX, Year)
+                if (!dateRegex.IsMatch(date))
+                {
+                    Console.WriteLine(date);
+                    return ParserResult.DateCellFormatError;
+                }
+                // Each entry in the expense field must have a valid format
+                for (int j = 0; j < table.Rows[i].Cells[1].Paragraphs.Count; j++)
+                {
+                    string entry = table.Rows[i].Cells[1].Paragraphs[j].Text;
+                    if (!expenseRegex.IsMatch(entry))
+                    {
+                        Console.WriteLine(entry);
+                        return ParserResult.ExpenseCellFormatError;
+                    }
+                }
+                string daily = table.Rows[i].Cells[2].Paragraphs[0].Text;
+                // The daily field must be of the format $X.XX (or None)
+                if (!dailyRegex.IsMatch(daily))
+                {
+                    Console.WriteLine(daily);
+                    return ParserResult.DailyCellFormatError;
+                }
+                // The left-over field must also be of the format $X.XX (or None)
+                string leftover = table.Rows[i].Cells[3].Paragraphs[0].Text;
+                if (!leftoverRegex.IsMatch(leftover))
+                {
+                    Console.WriteLine(leftover);
+                    return ParserResult.LeftoverCellFormatError;
+                }
+            }
+            return ParserResult.TableDataIntact;
+        }
+
+        // Extract the field values from this table row into a list
         private static List<string> ParseTableRow(TableRow tableRow)
         {
             // Declare the table variables for processing
@@ -191,6 +320,13 @@ namespace Dilip
                     amount = paragraph.Text.Substring(0, spaceIndex);
                     description = paragraph.Text.Substring(spaceIndex + 3);
                 }
+                else if (et == ExpenseType.Unknown)
+                {
+                    expenseType = "Unknown";
+                    int spaceIndex = paragraph.Text.IndexOf(' ');
+                    amount = paragraph.Text.Substring(0, spaceIndex);
+                    description = "Unknown Description";
+                }
                 // Add this record to the list
                 records.Add(date + " | " + amount + " | " + description + " | " + expenseType);
             }
@@ -204,10 +340,17 @@ namespace Dilip
             TextRange textRange = textSelection.GetAsOneRange();
             CharacterFormat characterFormat = textRange.CharacterFormat;
             Color highlightColor = characterFormat.HighlightColor;
-            // If there is no expense (white)
+            // If there is no expense (white) or if you left an expense entry unhighlighted
             if (highlightColor.R == 255 && highlightColor.G == 255 && highlightColor.B == 255)
             {
-                return ExpenseType.None;
+                if (paragraph.Text.Equals("None"))
+                {
+                    return ExpenseType.None;
+                }
+                else
+                {
+                    return ExpenseType.Unknown;
+                }
             }
             // If it's Appa's expense (grey)
             else if (highlightColor.R == highlightColor.G && highlightColor.G == highlightColor.B)
